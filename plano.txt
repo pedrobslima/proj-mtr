@@ -1,0 +1,9 @@
+0. Pegar o dataset de heart disease (e possivelmente de airbnb)
+1. Manipular os dados para deixá-los prontos para treinamento por modelos de ML 
+2. Pesquisar e escolher os modelos para serem testados (de preferência modelos que sabemos ter erros correlacionados)
+3. Treinar modelos (tentar achar os melhores hiperparâmetros, usar validação cruzada de 5 ou 10 folds)
+4. Construir assessores (treinados para tentar prever o erro dos modelos) (também tentar achar melhores hiperparâmetros):
+    4.1. Um assessor para cada modelo (RandomForestRegressor ou algum outro)
+    4.2. Um assessor multi-target para todos os modelos (RegressorChains (outputs relacionados) *e* Single Target Method (outputs independentes))
+    4.3. Um assessor para cada "família" ou grupo de modelos de ML com erros correlacionados (RegressorChains)
+5. Coletar resultados e tirar conclusões para apresentar
