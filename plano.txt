@@ -7,3 +7,10 @@
     4.2. Um assessor multi-target para todos os modelos (RegressorChains (outputs relacionados) *e* Single Target Method (outputs independentes))
     4.3. Um assessor para cada "família" ou grupo de modelos de ML com erros correlacionados (RegressorChains)
 5. Coletar resultados e tirar conclusões para apresentar
+
+
+
+Vc conseguiria agrupar por assessor em vez de por modelo.
+Não seria exatamente um gráfico de barras mas um histograma mesmo.
+Seriam três histogramas, um pra casa assessor
+Vc separa todos os NMSEs obtidos por um assessor e faz um histograma ou um boxplot
