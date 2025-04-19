@@ -1,0 +1,44 @@
+INFO DO PAPER PERDIDO
+
+https://arxiv.org/pdf/2502.03937v1
+
+- Tarefas e modelos: 
+	- Regressão com dados tabulares:
+		- Logistic Regression
+		- Random Forest
+		- XGBoost
+		- GAM
+		- NN1
+		- NN2
+	- Classificação de imagens:
+		- (os mesmos do anterior)
+		- CNN1
+		- CNN2
+	- Classificação de texto (não importa)
+
+- Os modelos não foram aperfeiçoados e tal (sem HPO), para ter mais variação nos erros
+
+- Correlação entre o erro de dois modelos é parecido com que eu estava fazendo, mas ao invés de calcular os acertos de cada um em relação aos valores reais, eram os erros, e ao invés de só fazer uma comparação direta entre os arrays de acerto/erro de cada modelo, é usada uma correlação chamada Φk.
+
+- Foram feitos experimentos de tipos diferentes, mas o que importa é o primeiro: "Algoritmos diferentes treinados no mesmo dataset", e dentro desse, a tarefa de regressão com dados tabulares. Os outros tipos foram:
+	- Mesma arquitetura e dataset, mas com apenas algumas features em comum (usou o XGBoost)
+	- (coisa de fine-tune de LLM)
+
+- Dataset desse experimento foi o California Housing
+
+- Grupos de alta correlação de erro:
+	- Random Forest, XGBoost e GAM
+	- NN1 e NN2
+
+- Os autores também fizeram feature importance do XGBoost (foi pro 2o tipo de experimento, mas tvz seja interessante fazer tbm)
+
+
+INFO DO PAPER PHI_K
+
+https://www.sciencedirect.com/science/article/pii/S0167947320301341?ref=pdf_download&fr=RR-2&rr=932f53bdce56a41b
+
+- Cramers V = Cramers Phi (Phi_c)
+
+- The recommendation (Smith, 2009) is not to use Cp (contigency coefficient) to compare correlations in tables with variables that have different numbers of categories (i.e. when r ̸= k).
+
+- Tenho duas opções basicamente: usar o phi_c ou o phi_k. Phi_c parece mais fácil de explicar, mas phi_k foi o que usaram nesse paper e tão dizendo que é bom. Então é.
