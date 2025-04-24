@@ -10,3 +10,6 @@ xgboost
 matplotlib
 seaborn
 scikit-plot
+torch
+tqdm
+phik
