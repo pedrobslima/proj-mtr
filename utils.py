@@ -107,3 +107,49 @@ def print_metrics_summary(accuracy, recall, precision, f1, auroc=None, aupr=None
         print("{metric:<18}{value:.4f}".format(metric="AUROC:", value=auroc))
     if aupr is not None:
         print("{metric:<18}{value:.4f}".format(metric="AUPR:", value=aupr))
+
+def nmse(y_true, y_pred, sample_weight=None, 
+         multioutput="uniform_average"):
+    mse_error = mse(y_true, y_pred, sample_weight=sample_weight, multioutput="raw_values")
+    variance = np.var(np.asarray(y_true), axis=0)
+    
+    if 0 in variance.flatten():
+        raise ValueError("A variância dos valores reais é zero; não é possível normalizar.")
+    
+    output_errors = mse_error / variance
+    if isinstance(multioutput, str):
+        if multioutput == "raw_values":
+            return output_errors
+        elif multioutput == "uniform_average":
+            # pass None as weights to np.average: uniform mean
+            multioutput = None
+
+    return np.average(output_errors, weights=multioutput)
+
+def nmse_models(y_true, y_pred):
+    y_pred = pd.DataFrame(y_pred, columns=y_true.columns)    
+    error = {}
+    for c in y_true.columns:
+        error[c] = nmse(y_true[c], y_pred[c])
+    return error
+
+def mse_models(y_true, y_pred):
+    y_pred = pd.DataFrame(y_pred, columns=y_true.columns)
+    error = {}
+    for c in y_true.columns:
+        error[c] = ((y_true[c] - y_pred[c])**2).mean()
+    return error
+
+def rmse_models(y_true, y_pred):
+    y_pred = pd.DataFrame(y_pred, columns=y_true.columns)
+    error = {}
+    for c in y_true.columns:
+        error[c] = (((y_true[c] - y_pred[c])**2).mean())**0.5
+    return error
+
+def mae_models(y_true, y_pred):
+    y_pred = pd.DataFrame(y_pred, columns=y_true.columns)
+    error = {}
+    for c in y_true.columns:
+        error[c] = (abs(y_true[c] - y_pred[c])).mean()
+    return error
