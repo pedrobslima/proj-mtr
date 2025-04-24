@@ -1,0 +1,12 @@
+scipy==1.11.4
+pandas
+numpy
+scikit-learn
+imblearn
+joblib
+mlflow
+git+https://github.com/pedrobslima/pykan-sklearn.git
+xgboost
+matplotlib
+seaborn
+scikit-plot
