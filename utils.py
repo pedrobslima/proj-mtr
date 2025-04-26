@@ -153,3 +153,116 @@ def mae_models(y_true, y_pred):
     for c in y_true.columns:
         error[c] = (abs(y_true[c] - y_pred[c])).mean()
     return error
+
+def group_search_help(df: pd.DataFrame, min_score: int, models: list | set = None, base_group: list = []):
+    if models is None:
+        models = ['dtree', 'sgd', 'lr', 'knn', 'svm_linear', 'svm_poly', 'svm_rbf', 'mlp',
+                  'kan', 'rforest', 'gb', 'adab', 'xgb']
+
+    if len(base_group) == 0:
+        base_group, models = models[:1], models[1:]
+
+    output_groups = []
+
+    for m in models:
+        check = True
+        for bg in base_group:
+            corr = df.at[bg, m]
+            if np.isnan(corr) or corr < min_score:
+                check = False
+                break
+        if check:
+            temp = models.copy()
+            temp.remove(m)
+            output_groups.append(
+                group_search_help(df, min_score, temp, base_group + [m])
+            )
+
+    if len(output_groups) == 0:
+        return base_group
+
+    return output_groups
+
+def group_search(df: pd.DataFrame, min_score: int, models: list = None):
+    if models is None:
+        models = ['dtree', 'sgd', 'lr', 'knn', 'svm_linear', 'svm_poly', 'svm_rbf', 'mlp',
+                  'kan', 'rforest', 'gb', 'adab', 'xgb']
+
+    # Corrige valores abaixo do min_score
+    df = df.map(lambda x: np.nan if x < min_score else x)
+
+    raw_groups = []
+    for i in range(len(models)):
+        raw_groups.append(group_search_help(df, min_score, models[i:]))
+
+    return remove_subgroups(flatten_groups(raw_groups))
+    
+def flatten_groups(nested_list):
+    flat_list = []
+
+    def _flatten(item):
+        if isinstance(item[0], list):
+            for subitem in item:
+                _flatten(subitem)
+        else:
+            flat_list.append(sorted(item))  # ordena para facilitar comparação de subconjuntos
+
+    _flatten(nested_list)
+    return flat_list
+
+def remove_subgroups(groups:list):
+    # Remove duplicatas (grupos com os mesmos elementos, em qualquer ordem)
+    seen = set()
+    unique_groups = []
+    for g in groups:
+        frozen = frozenset(g)
+        if frozen not in seen:
+            seen.add(frozen)
+            unique_groups.append(g)
+
+    # Agora removemos subconjuntos estritos
+    filtered_groups = []
+    for g in unique_groups:
+        is_subset = False
+        for other in unique_groups:
+            if g != other and set(g).issubset(set(other)):
+                is_subset = True
+                break
+        if not is_subset:
+            filtered_groups.append(g)
+
+    return filtered_groups
+
+def corrlArray(df_corrl:pd.DataFrame):
+    corrls_values = df_corrl.reset_index().melt(id_vars='index', var_name='model2', value_name='corr')
+    corrls_values = corrls_values.rename(columns={'index': 'model1'})
+    corrls_values = corrls_values[corrls_values['model1']!=corrls_values['model2']].reset_index(drop=True)
+    # ordenando strings por linha
+    corrls_values.loc[:,['model1','model2']] = pd.DataFrame(np.sort(corrls_values.loc[:,['model1','model2']].values, axis=1), columns=['model1','model2']) 
+    return corrls_values.drop_duplicates().reset_index(drop=True)
+
+def metricsFormat(df: pd.DataFrame, metric_name:str):
+    df = df.reset_index().melt(id_vars='index', var_name='model', value_name=metric_name)
+    df = df.rename(columns={'index': 'assessor_type'})
+
+    return df
+
+def save2figs(heatmap, histogram, directory:str):
+    '''Save a Heatmap and its corresponding Histogram into 2 .eps files'''
+    title1 = heatmap.get_title('center')
+    code2 = ''.join([s[0].lower() for s in histogram.get_title('center').split()])
+    if(title1.count(' ') > 3):
+        title1 = title1.replace('S', 's').replace('Train', 'TRAIN').replace('Test', 'TEST').replace('P', 'p')
+        code1 = ''.join([c.lower() for c in title1 if c.isupper()])
+        code1 = code1[:2] + '_' + code1[2:]
+    elif(title1.find('(') != -1):
+        title1 = title1[title1.index('(')+1:title1.index(')')]
+        code1 = 'cmd_' + ''.join([c.lower() for c in title1 if c.isupper()])
+    else:
+        code1 = 'cmd_base'
+    code2 += code1[code1.index('_'):]
+    
+    heatmap.figure.savefig(f'data/{directory}/imgs/{code1}.eps', format='eps', dpi=300)
+    print(f'[Saved image "{code1}.eps"]')
+    histogram.figure.savefig(f'data/{directory}/imgs/{code2}.eps', format='eps', dpi=300)
+    print(f'[Saved image "{code2}.eps"]')
