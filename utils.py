@@ -252,7 +252,7 @@ def save2figs(heatmap, histogram, directory:str):
     title1 = heatmap.get_title('center')
     code2 = ''.join([s[0].lower() for s in histogram.get_title('center').split()])
     if(title1.count(' ') > 3):
-        title1 = title1.replace('S', 's').replace('Train', 'TRAIN').replace('Test', 'TEST').replace('P', 'p')
+        title1 = title1.replace('Set', 'set').replace('Train', 'TRAIN').replace('Test', 'TEST').replace('P', 'p')
         code1 = ''.join([c.lower() for c in title1 if c.isupper()])
         code1 = code1[:2] + '_' + code1[2:]
     elif(title1.find('(') != -1):
