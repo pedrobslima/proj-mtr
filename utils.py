@@ -5,7 +5,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import scikitplot as skplt
 from random import randint
 
 # Preprocessing
@@ -88,14 +87,6 @@ def compute_performance_metrics(y, y_pred_class, y_pred_scores=None):
         aupr = average_precision_score(y, y_pred_scores)
         performance_metrics = performance_metrics + (auroc, aupr)
     return performance_metrics
-
-def plot_ks(y, y_pred_proba):
-    skplt.metrics.plot_ks_statistic(y, y_pred_proba)
-    plt.show()
-    y_pred_proba = y_pred_proba[:, 1]
-    auroc = roc_auc_score(y, y_pred_proba)
-    aupr = average_precision_score(y, y_pred_proba)
-    return auroc, aupr
 
 def print_metrics_summary(accuracy, recall, precision, f1, auroc=None, aupr=None):
     print()
