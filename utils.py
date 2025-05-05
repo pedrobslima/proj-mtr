@@ -6,30 +6,25 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from random import randint
+import networkx as nx
 
 # Preprocessing
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from imblearn.over_sampling import RandomOverSampler
 
-# MLFlow
-import joblib
-import mlflow
-import mlflow.sklearn
-import logging
-
 # Base Models (+ ST assessor)
-from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-from sklearn.linear_model import SGDClassifier, SGDRegressor
-from sklearn.linear_model import LogisticRegression, ElasticNet # LogReg->Classf. | ElasticNet->Reg. 
-from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import SGDClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC, SVR # kernels: 'linear', 'poly' e 'rbf'
-from sklearn.neural_network import MLPClassifier, MLPRegressor
-from kan import KANClassifier, KANRegressor
+from sklearn.neural_network import MLPClassifier
+from kan import KANClassifier
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
-from sklearn.ensemble import AdaBoostClassifier, AdaBoostRegressor
-from xgboost import XGBClassifier, XGBRegressor
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.ensemble import AdaBoostClassifier
+from xgboost import XGBClassifier
 
 # Multi-Target Assessors
 from sklearn.multioutput import MultiOutputRegressor, RegressorChain
@@ -108,6 +103,31 @@ def nmse(y_true, y_pred, sample_weight=None,
         raise ValueError("A variância dos valores reais é zero; não é possível normalizar.")
     
     output_errors = mse_error / variance
+    #y_pred = np.asarray(y_pred)
+    #y_true = np.asarray(y_true)
+
+    #output_errors = np.average((y_pred - y_true)**2 / (y_true - np.mean(y_true, axis=0).reshape(1,-1))**2, 
+    #                           axis=0, weights=sample_weight)
+    
+    if isinstance(multioutput, str):
+        if multioutput == "raw_values":
+            return output_errors
+        elif multioutput == "uniform_average":
+            # pass None as weights to np.average: uniform mean
+            multioutput = None
+
+    return np.average(output_errors, weights=multioutput)
+
+def nmae(y_true, y_pred, sample_weight=None, 
+         multioutput="uniform_average"):
+    y_pred = np.asarray(y_pred)
+    y_true = np.asarray(y_true)
+
+    #output_errors = np.average(np.abs(y_pred - y_true) / np.abs(y_true - np.mean(y_true, axis=0).reshape(1,-1)),
+    #                           axis=0, weights=sample_weight)
+
+    output_errors = np.average(np.abs(y_pred - y_true), axis=0, weights=sample_weight) / np.average(np.abs(y_true - np.mean(y_true, axis=0).reshape(1,-1)), axis=0)
+
     if isinstance(multioutput, str):
         if multioutput == "raw_values":
             return output_errors
@@ -174,55 +194,32 @@ def group_search_help(df: pd.DataFrame, min_score: int, models: list | set = Non
 
     return output_groups
 
-def group_search(df: pd.DataFrame, min_score: int, models: list = None):
-    if models is None:
-        models = ['dtree', 'sgd', 'lr', 'knn', 'svm_linear', 'svm_poly', 'svm_rbf', 'mlp',
-                  'kan', 'rforest', 'gb', 'adab', 'xgb']
+def group_search(df: pd.DataFrame, min_score: int):
+    G = nx.from_pandas_adjacency(df)
 
-    # Corrige valores abaixo do min_score
-    df = df.map(lambda x: np.nan if x < min_score else x)
+    # Remover arestas com peso menor que MIN_SCORE
+    edges_to_remove = [(u, v) for u, v, d in G.edges(data=True) if d["weight"] < min_score]
+    G.remove_edges_from(edges_to_remove)
+    cliques = list(nx.find_cliques(G))
+    # Encontrar os subgrafos conectados (componentes conexos)
+    #subgraphs = [G.subgraph(c).copy() for c in nx.connected_components(G)]
+    subgraphs = [G.subgraph(clique).copy() for clique in cliques]
+    groups = []
+    out_groups = []
+    # Exibir os subgrafos
+    for sg in subgraphs:
+        groups.append(set(sg.nodes()))
 
-    raw_groups = []
-    for i in range(len(models)):
-        raw_groups.append(group_search_help(df, min_score, models[i:]))
-
-    return remove_subgroups(flatten_groups(raw_groups))
-    
-def flatten_groups(nested_list):
-    flat_list = []
-
-    def _flatten(item):
-        if isinstance(item[0], list):
-            for subitem in item:
-                _flatten(subitem)
-        else:
-            flat_list.append(sorted(item))  # ordena para facilitar comparação de subconjuntos
-
-    _flatten(nested_list)
-    return flat_list
-
-def remove_subgroups(groups:list):
-    # Remove duplicatas (grupos com os mesmos elementos, em qualquer ordem)
-    seen = set()
-    unique_groups = []
-    for g in groups:
-        frozen = frozenset(g)
-        if frozen not in seen:
-            seen.add(frozen)
-            unique_groups.append(g)
-
-    # Agora removemos subconjuntos estritos
-    filtered_groups = []
-    for g in unique_groups:
-        is_subset = False
-        for other in unique_groups:
-            if g != other and set(g).issubset(set(other)):
-                is_subset = True
-                break
-        if not is_subset:
-            filtered_groups.append(g)
-
-    return filtered_groups
+    for i in range(len(groups)):
+        check = True
+        j=0
+        while(j < len(groups) and check):
+            if(i!=j):
+                check = not(groups[i]<=groups[j])
+            j+=1
+        if(check):
+            out_groups.append(list(groups[i]))
+    return out_groups
 
 def corrlArray(df_corrl:pd.DataFrame):
     corrls_values = df_corrl.reset_index().melt(id_vars='index', var_name='model2', value_name='corr')
