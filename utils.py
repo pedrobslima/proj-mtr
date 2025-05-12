@@ -4,14 +4,12 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 from random import randint
+import seaborn as sns
 import networkx as nx
-
-# Preprocessing
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from imblearn.over_sampling import RandomOverSampler
+import json
+from torch import save, load
+from sklearn.model_selection import GridSearchCV
 
 # Base Models (+ ST assessor)
 from sklearn.tree import DecisionTreeClassifier
@@ -35,6 +33,28 @@ from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_sc
 from sklearn.metrics import mean_squared_error as mse, mean_absolute_error as mae, root_mean_squared_error as rmse
 #from sklearn.inspection import PartialDependenceDisplay as pdp
 #from sklearn.inspection import permutation_importance
+from itertools import product
+
+def getAssrParams(estimator, estimator_params, random_state=42, mtr_seed=True, estimator_var='base_estimator'):
+    mtr_params = {estimator_var: []}
+    
+    if('random_state' in estimator().get_params().keys()):
+        estimator_params['random_state'] = [random_state]
+        if(mtr_seed):
+            mtr_params['random_state'] = [random_state]
+    
+    params_keys = list(estimator_params.keys())
+    lists_params = product(*estimator_params.values())
+    
+    for params in lists_params:
+        estimator_params = {}
+
+        for i in range(len(params)):
+            estimator_params[params_keys[i]] = params[i]
+
+        mtr_params[estimator_var].append(estimator(**estimator_params))
+
+    return mtr_params
 
 # ------ FUNCTIONS ------
 def extract_final_losses(history):
@@ -137,62 +157,49 @@ def nmae(y_true, y_pred, sample_weight=None,
 
     return np.average(output_errors, weights=multioutput)
 
-def nmse_models(y_true, y_pred):
-    y_pred = pd.DataFrame(y_pred, columns=y_true.columns)    
-    error = {}
-    for c in y_true.columns:
-        error[c] = nmse(y_true[c], y_pred[c])
-    return error
+def reltArray(y):
+    return y - np.average(y, axis=0)
 
-def mse_models(y_true, y_pred):
-    y_pred = pd.DataFrame(y_pred, columns=y_true.columns)
-    error = {}
-    for c in y_true.columns:
-        error[c] = ((y_true[c] - y_pred[c])**2).mean()
-    return error
+def aCC(y_true, y_pred):
+    '''average Correlation Coefficient'''
+    arrTrue = reltArray(np.asarray(y_true))
+    arrPred = reltArray(np.asarray(y_pred))
+    output_values = np.sum(arrTrue * arrPred, axis=0) / np.sqrt(np.sum(arrTrue**2, axis=0) * np.sum(arrPred**2, axis=0))
+    return np.mean(output_values)
 
-def rmse_models(y_true, y_pred):
-    y_pred = pd.DataFrame(y_pred, columns=y_true.columns)
-    error = {}
-    for c in y_true.columns:
-        error[c] = (((y_true[c] - y_pred[c])**2).mean())**0.5
-    return error
+def aRRMSE(y_true, y_pred):
+    '''average Relative Root-Mean Squared Error'''
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    out = np.sum((y_true-y_pred)**2, axis=0) / np.sum(reltArray(y_true)**2, axis=0) 
+    return np.mean(np.sqrt(out))
 
-def mae_models(y_true, y_pred):
-    y_pred = pd.DataFrame(y_pred, columns=y_true.columns)
-    error = {}
-    for c in y_true.columns:
-        error[c] = (abs(y_true[c] - y_pred[c])).mean()
-    return error
+def corrCoeff(y_true, y_pred, multioutput="uniform_average"):
+    '''Correlation coefficient'''
+    arrTrue = reltArray(np.asarray(y_true))
+    arrPred = reltArray(np.asarray(y_pred))
+    output_values = np.sum(arrTrue * arrPred, axis=0) / np.sqrt(np.sum(arrTrue**2, axis=0) * np.sum(arrPred**2, axis=0))
+    if isinstance(multioutput, str):
+        if multioutput == "raw_values":
+            return output_values
+        elif multioutput == "uniform_average":
+            # pass None as weights to np.average: uniform mean
+            multioutput = None
+    return np.average(output_values, weights=multioutput)
 
-def group_search_help(df: pd.DataFrame, min_score: int, models: list | set = None, base_group: list = []):
-    if models is None:
-        models = ['dtree', 'sgd', 'lr', 'knn', 'svm_linear', 'svm_poly', 'svm_rbf', 'mlp',
-                  'kan', 'rforest', 'gb', 'adab', 'xgb']
+def rrmse(y_true, y_pred, multioutput="uniform_average"):
+    '''Relative root-mean squared error'''
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    output_errors = np.sqrt(np.sum((y_true-y_pred)**2, axis=0) / np.sum(reltArray(y_true)**2, axis=0))
+    if isinstance(multioutput, str):
+        if multioutput == "raw_values":
+            return output_errors
+        elif multioutput == "uniform_average":
+            # pass None as weights to np.average: uniform mean
+            multioutput = None
 
-    if len(base_group) == 0:
-        base_group, models = models[:1], models[1:]
-
-    output_groups = []
-
-    for m in models:
-        check = True
-        for bg in base_group:
-            corr = df.at[bg, m]
-            if np.isnan(corr) or corr < min_score:
-                check = False
-                break
-        if check:
-            temp = models.copy()
-            temp.remove(m)
-            output_groups.append(
-                group_search_help(df, min_score, temp, base_group + [m])
-            )
-
-    if len(output_groups) == 0:
-        return base_group
-
-    return output_groups
+    return np.average(output_errors, weights=multioutput)
 
 def group_search(df: pd.DataFrame, min_score: int):
     G = nx.from_pandas_adjacency(df)
@@ -254,3 +261,134 @@ def save2figs(heatmap, histogram, directory:str):
     print(f'[Saved image "{code1}.eps"]')
     histogram.figure.savefig(f'data/{directory}/imgs/{code2}.eps', format='eps', dpi=300)
     print(f'[Saved image "{code2}.eps"]')
+
+def assr_performance(assr, X_test, y_test, X_train=None, y_train=None):
+
+    if(not((X_train is None) or (y_train is None))):
+        y_pred = assr.predict(X_train)
+
+        print(f'''[TRAINING SET]
+MSE: {mse(y_train, y_pred):.4f}
+NMSE: {nmse(y_train, y_pred):.4f}
+MAE: {mae(y_train, y_pred):.4f}
+NMAE: {nmae(y_train, y_pred):.4f}
+aRRMSE: {rrmse(y_train, y_pred):.4f}
+aCC: {corrCoeff(y_train, y_pred):.4f}''')
+
+    y_pred = assr.predict(X_test)
+
+    mse_array = mse(y_test, y_pred, multioutput='raw_values')
+    nmse_array = nmse(y_test, y_pred, multioutput='raw_values')
+    mae_array = mae(y_test, y_pred, multioutput='raw_values')
+    nmae_array = nmae(y_test, y_pred, multioutput='raw_values')
+    rrmse_array = rrmse(y_test, y_pred, multioutput='raw_values')
+    corrCoeff_array = corrCoeff(y_test, y_pred, multioutput='raw_values')
+    
+    print(f'''\n[TESTING SET]
+MSE: {np.average(mse_array):.4f}
+NMSE: {np.average(nmse_array):.4f}
+MAE: {np.average(mae_array):.4f}
+NMAE: {np.average(nmae_array):.4f}
+aRRMSE: {np.average(rrmse_array):.4f}
+aCC: {np.average(corrCoeff_array):.4f}''')
+    
+    return np.asarray([mse_array,
+                       nmse_array,
+                       mae_array,
+                       nmae_array,
+                       rrmse_array,
+                       corrCoeff_array]).T
+
+
+def correlation_matrix(corrls, show_plot:bool, save_plot:str, pred_name:str, set_name:str):
+    hm = plt.figure(figsize=(20,8))
+
+    plt.title(f'Correlation Matrix ({pred_name} {set_name} Set Predictions)', fontsize=17)
+    hm.axes[0] = sns.heatmap(corrls, annot=True, ax=hm.axes[0])
+    hm.axes[0].xaxis.tick_top()
+
+    assr_corrls_values = corrlArray(corrls)['corr']
+
+    hg = plt.figure()
+    plt.title('Correlation Distribution')
+    hg.axes[0] = assr_corrls_values.hist()
+    
+    if(show_plot):
+        plt.show(hm)
+        plt.show(hg)
+    else:
+        plt.close(hm)
+        plt.close(hg)
+    
+    print(f'{set_name} correlation distribution:')
+    print(assr_corrls_values.describe())
+
+    if(save_plot is not None):
+        save2figs(hm.axes[0], hg.axes[0], save_plot)
+
+def correlation_pred_performance(assr, X_test, y_test, X_train=None, min_score:float=0.7,
+                                 show_plot:bool=True, save_plot:str=None, name=None):
+    assr_groups = {}
+
+    if(name is None):
+        name=str(assr)
+        name = name[:name.find('(')]
+
+    if(X_train is not None):
+        assr_corrls = pd.DataFrame(assr.predict(X_train), 
+                          columns=y_test.columns, 
+                          index=X_train.index).corr('kendall')
+        
+        correlation_matrix(assr_corrls, show_plot, save_plot, name, 'Training')
+        assr_groups['train'] = group_search(assr_corrls, min_score)
+
+    assr_corrls = pd.DataFrame(assr.predict(X_test), 
+                          columns=y_test.columns, 
+                          index=X_test.index).corr('kendall')
+    
+    correlation_matrix(assr_corrls, show_plot, save_plot, name, 'Testing')
+    assr_groups['test'] = group_search(assr_corrls, min_score)
+
+    pred_corrls = y_test.corr('kendall')
+
+    performance = [mse(pred_corrls, assr_corrls), 
+                   mae(pred_corrls, assr_corrls), 
+                   nmse(pred_corrls, assr_corrls), 
+                   nmae(pred_corrls, assr_corrls), 
+                   rrmse(pred_corrls, assr_corrls), 
+                   corrCoeff(pred_corrls, assr_corrls)]
+
+    diff_corrls = assr_corrls - pred_corrls
+
+    diff_corrls_values = corrlArray(diff_corrls)['corr']
+
+    print(F'''
+Diferença entre correlações das previsões do assessor e do conjunto de teste:
+MSE: {performance[0]:.4f}
+NMSE: {performance[1]:.4f}
+MAE: {performance[2]:.4f}
+NMAE: {performance[3]:.4f}
+aRRMSE: {performance[4]:.4f}
+aCC: {performance[5]:.4f}''')
+
+    hm = plt.figure(figsize=(20,8))
+    #plt.title(r'$Corr_{pred(MultiRandomForest)}$ - $Corr_{true(test)}$', fontsize=21)
+    plt.title('$Corr_{pred(' + name + ')}$ - $Corr_{true(test)}$', fontsize=21)
+    hm.axes[0] = sns.heatmap(diff_corrls, annot=True, cmap='coolwarm', vmin=-0.5, vmax=0.5, ax=hm.axes[0])
+    hm.axes[0].xaxis.tick_top()
+
+    hg = plt.figure()
+    plt.title('Correlation Difference Distribution')
+    hg.axes[0] = diff_corrls_values.hist()
+
+    if(show_plot):
+        plt.show(hm)
+        plt.show(hg)
+    else:
+        plt.close(hm)
+        plt.close(hg)
+        
+    if(save_plot is not None):
+        save2figs(hm.axes[0], hg.axes[0], save_plot)
+    
+    return {'results': performance, 'groups': assr_groups}

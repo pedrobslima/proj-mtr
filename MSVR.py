@@ -15,8 +15,9 @@ Multi-output Support Vector Regression
 
 import numpy as np
 from sklearn.metrics.pairwise import pairwise_kernels
+from sklearn.base import BaseEstimator
 
-class MSVR():
+class MSVR(BaseEstimator):
     def __init__(self, kernel='rbf', degree=3, gamma=None, coef0=0.0, tol=0.001, C=1.0, epsilon=0.1):
         super(MSVR, self).__init__()
         self.kernel = kernel
@@ -29,6 +30,7 @@ class MSVR():
         self.Beta = None
         self.NSV = None
         self.xTrain = None
+        self.is_fitted_ = False
 
     def fit(self, x, y):
         self.xTrain = x.copy()
@@ -36,13 +38,22 @@ class MSVR():
         epsi = self.epsilon
         tol = self.tol
 
+        if(isinstance(self.gamma, str)):
+            if(self.gamma=='auto'): # same as self.gamma=None
+                self._gamma = 1.0 / x.shape[1]
+            elif(self.gamma=='scale'):
+                x_var = np.var(x)
+                self._gamma = 1.0 / (x.shape[1] * x_var) if x_var != 0 else 1.0
+        else:
+            self._gamma = self.gamma
+
         n_m = np.shape(x)[0]  # num of samples
         n_d = np.shape(x)[1]  # input data dimensionality
         n_k = np.shape(y)[1]  # output data dimensionality (output variables)
 
         # H = kernelmatrix(ker, x, x, par)
         H = pairwise_kernels(x, x, metric=self.kernel, filter_params=True,
-                             degree=self.degree, gamma=self.gamma, coef0=self.coef0)
+                             degree=self.degree, gamma=self._gamma, coef0=self.coef0)
 
         self.Beta = np.zeros((n_m, n_k))
 
@@ -161,10 +172,23 @@ class MSVR():
 
         self.NSV = len(i1)
 
+        self.is_fitted_ = True
+
+        return self
+
     def predict(self, x):
         H = pairwise_kernels(x, self.xTrain, metric=self.kernel, filter_params=True,
-                             degree=self.degree, gamma=self.gamma, coef0=self.coef0)
+                             degree=self.degree, gamma=self._gamma, coef0=self.coef0)
         yPred = np.dot(H, self.Beta)
         return yPred
 
-    # def score(self,x):
+    def get_params(self, deep=False):
+        return {
+        'kernel': self.kernel,
+        'degree': self.degree,
+        'gamma': self.gamma,
+        'coef0': self.coef0,
+        'tol': self.tol,
+        'C': self.C,
+        'epsilon': self.epsilon
+        }
