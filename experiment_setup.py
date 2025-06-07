@@ -1,5 +1,6 @@
 from utils import *
 from MSVR import MSVR
+from joblib import load as jload, dump as jdump
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from imblearn.over_sampling import RandomOverSampler
@@ -9,7 +10,7 @@ import optuna
 #print(self.seed)
 
 class ExpSetup():
-    def __init__(self, directory:str, random_state:int, kan_train:int=None):
+    def __init__(self, directory:str, random_state:int, train_models:int=None):
         '''Class made for seting up the experiments, mostly to save on
         memory space while gathering data for the assessors to train
         
@@ -17,7 +18,7 @@ class ExpSetup():
         It's also the codename given to the experiment
         - random_state: The seed given to all methods used in this object, that use a random starting state
 
-        - kan_train: (VERY IMPORTANT!) Dictates how the Kolmogorov-Arnold Network will be trained:
+        - self.train_models: (VERY IMPORTANT!) Dictates how the Kolmogorov-Arnold Network will be trained:
             - 0: Won't be trained, and instead use the saved parameters and weights for this experiment, saved on the kan_params folder
 
             - 1: Will be trained, but won't search for the best parameters, using the saved params on kan_params/{directory}.json. 
@@ -29,14 +30,15 @@ class ExpSetup():
         
         self.directory = directory
         self.seed = random_state
-        
+        self.train_models = train_models
+
         {'heart': self._heartData,
          'churn': self._churnData,
          'covid': self._covidData,
          'bug': self._bugData
          }[self.directory]()
 
-        self._trainBaseModels(kan_train)
+        self._trainBaseModels()
 
     def saveData(self):
         pass
@@ -276,7 +278,7 @@ class ExpSetup():
                                         'auroc':metrics[4], 'aupr':metrics[5]}
 
 
-    def _trainBaseModels(self, kan_cv):
+    def _trainBaseModels(self):
         """# Base Models"""
 
         self.performs = {}
@@ -292,12 +294,9 @@ class ExpSetup():
                     'min_samples_split':[2,5,10,20,40,60],
                     'min_samples_leaf':[1,2,10,30]}
 
-        g_search = GridSearchCV(DecisionTreeClassifier(random_state=self.seed), dt_params, n_jobs=-1, cv=10).fit(self.Xb_train, self.yb_train)
-        #print(g_search.best_params_)
-        dtree = g_search.best_estimator_
+        dtree = self._trainIndModel(DecisionTreeClassifier(random_state=self.seed), 'dtree', dt_params)
 
         self._registerPerformance((self.Xb_train, self.yb_train), (self.Xb_test, self.yb_test), dtree, 'dtree')
-
         models_error['dtree'] = 1 - dtree.predict_proba(self.Xb_test)[np.arange(len(self.Xb_test)), self.yb_test]
         models_error.head()
 
@@ -313,9 +312,7 @@ class ExpSetup():
             'alpha': [1e-4, 1e-3, 1e-2]
         }
 
-        g_search = GridSearchCV(SGDClassifier(random_state=self.seed), sgd_params, n_jobs=-1, cv=10).fit(self.Xb_train_norm, self.yb_train)
-        #print(g_search.best_params_)
-        sgd = g_search.best_estimator_
+        sgd = self._trainIndModel(SGDClassifier(random_state=self.seed), 'sgd', sgd_params, norm_data=True)
 
         self._registerPerformance((self.Xb_train_norm, self.yb_train), (self.Xb_test_norm, self.yb_test), sgd, 'sgd')
         models_error['sgd'] = 1 - sgd.predict_proba(self.Xb_test_norm)[np.arange(len(self.Xb_test_norm)), self.yb_test]
@@ -323,17 +320,13 @@ class ExpSetup():
 
         """### Logistic Regression"""
 
-        lr = LogisticRegression(random_state=self.seed, n_jobs=-1).fit(self.Xb_train_norm, self.yb_train)
-
         lr_params = {
             'C': [0.01, 0.1, 1, 10],
             'penalty': ['l2'],
             'solver': ['lbfgs', 'liblinear']
         }
 
-        g_search = GridSearchCV(LogisticRegression(random_state=self.seed), lr_params, n_jobs=-1, cv=10).fit(self.Xb_train_norm, self.yb_train)
-        #print(g_search.best_params_)
-        lr = g_search.best_estimator_
+        lr = self._trainIndModel(LogisticRegression(random_state=self.seed), 'lr', lr_params, norm_data=True)
 
         self._registerPerformance((self.Xb_train_norm, self.yb_train), (self.Xb_test_norm, self.yb_test), lr, 'lr')
         models_error['lr'] = 1 - lr.predict_proba(self.Xb_test_norm)[np.arange(len(self.Xb_test_norm)), self.yb_test]
@@ -352,9 +345,7 @@ class ExpSetup():
             'metric': ['euclidean', 'manhattan']
         }
 
-        g_search = GridSearchCV(KNeighborsClassifier(), knn_params, n_jobs=-1, cv=10).fit(self.Xb_train_norm, self.yb_train)
-        #print(g_search.best_params_)
-        knn = g_search.best_estimator_
+        knn = self._trainIndModel(KNeighborsClassifier(), 'knn', knn_params, norm_data=True)
 
         self._registerPerformance((self.Xb_train_norm, self.yb_train), (self.Xb_test_norm, self.yb_test), knn, 'knn')
         models_error['knn'] = 1 - knn.predict_proba(self.Xb_test_norm)[np.arange(len(self.Xb_test_norm)), self.yb_test]
@@ -370,9 +361,8 @@ class ExpSetup():
             'C': [0.1, 1, 10]
         }
 
-        g_search = GridSearchCV(SVC(kernel='linear', probability=True, random_state=self.seed), svm_linear_params, n_jobs=-1, cv=10).fit(self.Xb_train_norm, self.yb_train)
-        #print(g_search.best_params_)
-        svm_linear = g_search.best_estimator_
+        svm_linear = self._trainIndModel(SVC(kernel='linear', probability=True, random_state=self.seed), 
+                                         'svm_linear', svm_linear_params, norm_data=True)
 
         self._registerPerformance((self.Xb_train_norm, self.yb_train), (self.Xb_test_norm, self.yb_test), svm_linear , 'svm_linear')
         models_error['svm_linear'] = 1 - svm_linear.predict_proba(self.Xb_test_norm)[np.arange(len(self.Xb_test_norm)), self.yb_test]
@@ -390,9 +380,8 @@ class ExpSetup():
             'gamma': ['scale', 'auto']
         }
 
-        g_search = GridSearchCV(SVC(kernel='poly', probability=True, random_state=self.seed), svm_poly_params, n_jobs=-1, cv=10).fit(self.Xb_train_norm, self.yb_train)
-        #print(g_search.best_params_)
-        svm_poly = g_search.best_estimator_
+        svm_poly = self._trainIndModel(SVC(kernel='poly', probability=True, random_state=self.seed), 
+                                       'svm_poly', svm_poly_params, norm_data=True)
 
         self._registerPerformance((self.Xb_train_norm, self.yb_train), (self.Xb_test_norm, self.yb_test), svm_poly, 'svm_poly')
         models_error['svm_poly'] = 1 - svm_poly.predict_proba(self.Xb_test_norm)[np.arange(len(self.Xb_test_norm)), self.yb_test]
@@ -409,9 +398,8 @@ class ExpSetup():
             'gamma': ['scale', 'auto']
         }
 
-        g_search = GridSearchCV(SVC(kernel='rbf', probability=True, random_state=self.seed), svm_rbf_params, n_jobs=-1, cv=10).fit(self.Xb_train_norm, self.yb_train)
-        #print(g_search.best_params_)
-        svm_rbf = g_search.best_estimator_
+        svm_rbf = self._trainIndModel(SVC(kernel='rbf', probability=True, random_state=self.seed), 
+                                      'svm_rbf', svm_rbf_params, norm_data=True)
 
         self._registerPerformance((self.Xb_train_norm, self.yb_train), (self.Xb_test_norm, self.yb_test), svm_rbf, 'svm_rbf')
         models_error['svm_rbf'] = 1 - svm_rbf.predict_proba(self.Xb_test_norm)[np.arange(len(self.Xb_test_norm)), self.yb_test]
@@ -430,9 +418,8 @@ class ExpSetup():
             'alpha': [0.0001, 0.001]
         }
 
-        g_search = GridSearchCV(MLPClassifier(max_iter=1000, n_iter_no_change=20, random_state=self.seed), mlp_params, n_jobs=-1, cv=10).fit(self.Xb_train_norm, self.yb_train)
-        #print(g_search.best_params_)
-        mlp = g_search.best_estimator_
+        mlp = self._trainIndModel(MLPClassifier(max_iter=1000, n_iter_no_change=20, random_state=self.seed), 
+                                  'mlp', mlp_params, norm_data=True)
 
         self._registerPerformance((self.Xb_train_norm, self.yb_train), (self.Xb_test_norm, self.yb_test), mlp, 'mlp')
         models_error['mlp'] = 1 - mlp.predict_proba(self.Xb_test_norm)[np.arange(len(self.Xb_test_norm)), self.yb_test]
@@ -442,8 +429,8 @@ class ExpSetup():
         (KAN)
         """
 
-        if(kan_cv is None):
-            kan_cv = int(input('Train KAN? (0-No / 1-Yes / 2-Yes+HPO): '))
+        if(self.train_models is None):
+            self.train_models = int(input('Train KAN? (0-No / 1-Yes / 2-Yes+HPO): '))
 
         '''dataset = {'train_input': self.Xb_train_norm,
                 'train_label': self.yb_train,
@@ -456,7 +443,7 @@ class ExpSetup():
                     'lr': [0.0001, 0.001, 0.01],
                     'lamb': [0.005, 0.1]}
 
-        if(kan_cv==2):
+        if(self.train_models==2):
             best_score = 0
             for w in kan_params['width']:
                 for g in kan_params['grid']:
@@ -470,12 +457,12 @@ class ExpSetup():
                                 best_lr = lr
                                 best_lamb = l
             kanet = KANClassifier(best_width, grid=best_grid, lr=best_lr, lamb=best_lamb, random_state=self.seed, grid_eps=1, steps=15).fit(self.Xb_train_norm, self.yb_train)
-            with open(f'kan_params/{self.directory}.json', 'w') as f:
+            with open(f'models/{self.directory}/kan_params.json', 'w') as f:
                 json.dump({'width': best_width, 'grid': best_grid, 'lr': best_lr, 'lamb': best_lamb}, f)
                 #joblib.dump(kanet.state_dict(), 'kan_params/{self.directory}.pkl')
-            save(kanet.state_dict(), f'kan_params/{self.directory}.pt')
+            save(kanet.state_dict(), f'models/{self.directory}/kan.pt')
         else:
-            with open(f'kan_params/{self.directory}.json', 'r') as f:
+            with open(f'models/{self.directory}/kan_params.json', 'r') as f:
                 kan_dict = json.load(f)
             best_width = kan_dict['width']
             best_grid = kan_dict['grid']
@@ -484,11 +471,11 @@ class ExpSetup():
 
             kanet = KANClassifier(best_width, grid=best_grid, lr=best_lr, lamb=best_lamb, random_state=self.seed, grid_eps=1, steps=15)
 
-            if(kan_cv==0):
-                kanet.load_state_dict(load(f'kan_params/{self.directory}.pt', weights_only=True))
-            elif(kan_cv==1):
+            if(self.train_models==0):
+                kanet.load_state_dict(load(f'models/{self.directory}/kan.pt', weights_only=True))
+            elif(self.train_models==1):
                 kanet.fit(self.Xb_train_norm, self.yb_train)
-                save(kanet.state_dict(), f'kan_params/{self.directory}.pt')
+                save(kanet.state_dict(), f'models/{self.directory}/kan.pt')
 
         #print('width: {},\ngrid: {},\nlr: {},\nlamb: {}'.format(best_width, best_grid, best_lr, best_lamb))
 
@@ -506,9 +493,7 @@ class ExpSetup():
                     'min_samples_leaf':[1,2,10,30],
                     'n_estimators':[20,50,100,150]}
 
-        g_search = GridSearchCV(RandomForestClassifier(random_state=self.seed), parameters, n_jobs=-1, cv=10).fit(self.Xb_train, self.yb_train)
-        #print(g_search.best_params_)
-        rforest = g_search.best_estimator_
+        rforest = self._trainIndModel(RandomForestClassifier(random_state=self.seed), 'rforest', parameters)
 
         self._registerPerformance((self.Xb_train, self.yb_train), (self.Xb_test, self.yb_test), rforest, 'rforest')
         models_error['rforest'] = 1 - rforest.predict_proba(self.Xb_test)[np.arange(len(self.Xb_test)), self.yb_test]
@@ -524,9 +509,7 @@ class ExpSetup():
                     'learning_rate': [0.01, 0.05, 0.1],
                     'n_estimators':[20,50,100,150]}
 
-        g_search = GridSearchCV(GradientBoostingClassifier(random_state=self.seed), gb_params, n_jobs=-1, cv=10).fit(self.Xb_train, self.yb_train)
-        #print(g_search.best_params_)
-        gb = g_search.best_estimator_
+        gb = self._trainIndModel(GradientBoostingClassifier(random_state=self.seed), 'gb', gb_params)
 
         self._registerPerformance((self.Xb_train, self.yb_train), (self.Xb_test, self.yb_test), gb, 'gb')
         models_error['gb'] = 1 - gb.predict_proba(self.Xb_test)[np.arange(len(self.Xb_test)), self.yb_test]
@@ -539,9 +522,7 @@ class ExpSetup():
         adab_params = {'learning_rate': [0.01, 0.05, 0.1, 1],
                     'n_estimators':[20,50,100,150]}
 
-        g_search = GridSearchCV(AdaBoostClassifier(random_state=self.seed), adab_params, n_jobs=-1, cv=10).fit(self.Xb_train, self.yb_train)
-        #print(g_search.best_params_)
-        adab = g_search.best_estimator_
+        adab = self._trainIndModel(AdaBoostClassifier(random_state=self.seed), 'adab', adab_params)
 
         self._registerPerformance((self.Xb_train, self.yb_train), (self.Xb_test, self.yb_test), adab, 'adab')
         models_error['adab'] = 1 - adab.predict_proba(self.Xb_test)[np.arange(len(self.Xb_test)), self.yb_test]
@@ -558,9 +539,7 @@ class ExpSetup():
             'gamma': [None, 0.25, 0.5]
         }
 
-        g_search = GridSearchCV(XGBClassifier(random_state=self.seed), xgb_params, n_jobs=1, cv=10).fit(self.Xb_train, self.yb_train)
-        #print(g_search.best_params_)
-        xgb = g_search.best_estimator_
+        xgb = self._trainIndModel(XGBClassifier(random_state=self.seed), 'xgb', xgb_params)
 
         self._registerPerformance((self.Xb_train, self.yb_train), (self.Xb_test, self.yb_test), xgb, 'xgb')
         models_error['xgb'] = 1 - xgb.predict_proba(self.Xb_test)[np.arange(len(self.Xb_test)), self.yb_test] #xgb.predict(self.Xb_test) != self.yb_test
@@ -605,6 +584,26 @@ class ExpSetup():
             self.ya_test.loc[:,model_names[i]] = 1 - y_pred[np.arange(len(y_pred)), self.ya_test_tgt]
 
         self.pred_corrls2 = self.ya_test.corr('kendall')
+
+    def _trainIndModel(self, mbase, mname:str, mparams:dict, norm_data:bool=False):
+        if(self.train_models==2):
+            n_jobs = 1 if isinstance(mbase, XGBClassifier) else -1
+            g_search = GridSearchCV(mbase, mparams, n_jobs=n_jobs, cv=10, verbose=0)
+            if(norm_data):
+                g_search = g_search.fit(self.Xb_train_norm, self.yb_train)
+            else:
+                g_search = g_search.fit(self.Xb_train, self.yb_train)
+            new_model = g_search.best_estimator_
+            jdump(new_model, f'models/{self.directory}/{mname}.pkl')
+        else:
+            with open(f'models/{self.directory}/{mname}.pkl', 'rb') as f:
+                base_model = jload(f)
+            if(self.train_models):
+                new_model = mbase.set_params(**base_model.get_params())
+                jdump(new_model, f'models/{self.directory}/{mname}.pkl')
+            else:
+                new_model = base_model
+        return new_model
 
 class OptunaStudy():
     def __init__(self, x, y, num_trials, random_state):
@@ -698,13 +697,27 @@ class OptunaStudy():
 
 class GroupedAssessor():
     '''Group of multi-target assessors, making predictions similarly to a comitee'''
-    def __init__(self, model_class, output_tgts, random_state):
-        self.model_class = model_class
-        #self.bm_params = bm_params
-        self.cols = output_tgts
-        self.out_freq = {o: 0 for o in output_tgts}
-        self.assessors = []
-        self.seed = random_state
+    def __init__(self, estimators):
+        self.assessors = estimators
+
+    def fit(self, X, y, groups:list=None):
+        self.cols = y.columns
+        self.out_freq = {o: 0 for o in self.cols}
+        if(groups is None):
+            self.groups = [self.cols]*len(self.assessors)
+        else:
+            if(len(groups) != len(self.assessors)):
+                raise ValueError('O número de grupos e de modelos deve ser igual')
+            self.groups = groups
+
+        for i, g in enumerate(self.groups):
+            try:
+                self.assessors[i].fit(X, y[g])
+            except:
+                self.assessors[i].fit(X, y[g].values)
+            for m in g:
+                self.out_freq[m] += 1
+        return self
 
     def predict(self, X):
         len_x = X.shape[0]
@@ -712,33 +725,4 @@ class GroupedAssessor():
         for i, g in enumerate(self.groups):
             y_pred.loc[:,g] = y_pred.loc[:,g] + self.assessors[i].predict(X).reshape(len_x,len(g))
         y_pred = y_pred / self.out_freq
-        return y_pred
-
-    def _fit(self, X, y, groups:list, assr_params:dict):
-        self.groups = groups
-
-        for g in self.groups:
-            g_search = GridSearchCV(self.model_class,
-                                    assr_params, 
-                                    n_jobs=-1, 
-                                    scoring="neg_mean_absolute_error").fit(X, y[g])
-            print(g_search.best_params_)
-            self.assessors.append(g_search.best_estimator_)
-
-            for m in g:
-                self.out_freq[m] += 1
-
-        return self
-
-    def fit(self, X, y, groups:list, **params):
-        self.groups = groups
-        g=[]
-
-        for g in self.groups:
-
-            self.assessors.append(self.model_class(**params).fit(X, y[g].values))
-            
-            for m in g:
-                self.out_freq[m] += 1
-                
-        return self
+        return np.asarray(y_pred)

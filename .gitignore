@@ -1,4 +1,5 @@
 .auto/
 .vscode/
+.venv/
 teste.py
 teste.eps

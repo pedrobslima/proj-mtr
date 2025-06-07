@@ -392,3 +392,11 @@ aCC: {performance[5]:.4f}''')
         save2figs(hm.axes[0], hg.axes[0], save_plot)
     
     return {'results': performance, 'groups': assr_groups}
+
+def multIdx(*indexes, subindex:list):
+    idx_tups = list(product(indexes, subindex))
+    return pd.MultiIndex.from_tuples(idx_tups, names=['Assessor', 'Model'])
+
+def pseudoRandSeq(base_seq, seed, n_seq=1):
+    rng = np.random.default_rng(seed=seed)
+    return [rng.permutation(base_seq) for _ in range(n_seq)]
